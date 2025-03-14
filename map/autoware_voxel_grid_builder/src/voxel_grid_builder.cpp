@@ -16,24 +16,25 @@ namespace autoware::voxel_grid_builder
 template <typename PointT>
 VoxelGridBuilder<PointT>::Leaf::Leaf() 
 : nr_points_(0),
-    icov_(Eigen::Matrix3d::Identity())
-{
-    centroid_.resize(3);
-    centroid_.setZero();
-}
+    centroid_(Eigen::Vector3f::Zero()),
+    icov_(Eigen::Matrix3f::Identity()),
+    first_(Eigen::Vector3f::Zero())
+{}
 
 template <typename PointT>
 VoxelGridBuilder<PointT>::Leaf::Leaf(const Leaf & other)
 : nr_points_(other.nr_points_),
     centroid_(other.centroid_),
-    icov_(other.icov_)
+    icov_(other.icov_),
+    first_(other.first_)
 {}
 
 template <typename PointT>
 VoxelGridBuilder<PointT>::Leaf::Leaf(Leaf && other)
 : nr_points_(other.nr_points_),
     centroid_(std::move(other.centroid_)),
-    icov_(std::move(other.icov_))
+    icov_(std::move(other.icov_)),
+    first_(std::move(other.first_))
 {}
 
 template <typename PointT>
@@ -42,6 +43,7 @@ typename VoxelGridBuilder<PointT>::Leaf & VoxelGridBuilder<PointT>::Leaf::operat
     nr_points_ = other.nr_points_;
     centroid_ = other.centroid_;
     icov_ = other.icov_;
+    first_ = other.first_;
     
     return *this;
 }
@@ -52,6 +54,7 @@ typename VoxelGridBuilder<PointT>::Leaf & VoxelGridBuilder<PointT>::Leaf::operat
     nr_points_ = other.nr_points_;
     centroid_ = std::move(other.centroid_);
     icov_ = std::move(other.icov_);
+    first_ = std::move(other.first_);
 
     return *this;
 }
@@ -90,6 +93,13 @@ void VoxelGridBuilder<PointT>::Leaf::from_binary(std::istream & is)
     icov_(2, 0) = icov_(0, 2);
     icov_(2, 1) = icov_(1, 2);
 }
+
+template <typename PointT>
+VoxelGridBuilder<PointT>::VoxelGridBuilder()
+: resolution_(2.0),
+    min_points_per_voxel_(6),
+    min_cov_eval_mult_(0.01)
+{}
 
 template <typename PointT>
 std::vector<std::string> VoxelGridBuilder<PointT>::discoverPCDs(const std::string &pcd_dir_or_file)
@@ -157,35 +167,49 @@ void VoxelGridBuilder<PointT>::applyFilter(const PclCloudConstPtr & input, std::
         updateLeaf(leaf, p);
     }
 
-    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigensolver;
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigensolver;
 
     // Phase 1: compute inverse covariance of leaves
-    for (auto & leaf : voxel_grid) {
-        if (computeLeafParams(eigensolver, leaf)) {
-            // Write to file if the voxel is good enough
-            leaf.to_binary(os);
+    for (auto & voxel : voxel_grid) {
+        if (voxel.second.nr_points_ >= min_points_per_voxel_) {
+            computeLeafParams(eigensolver, voxel.second);
+        } else {
+            voxel.second.centroid_[0] = std::numeric_limits<typename std::remove_reference<decltype(voxel.second.centroid_(0))>::type>::infinity();
         }
+
+        voxel.second.to_binary(os);
     }
 }
 
 template <typename PointT>
 void VoxelGridBuilder<PointT>::updateLeaf(Leaf & leaf, const PointT & p)
 {
-    leaf.icov_(0, 0) += p.x * p.x;
-    leaf.icov_(0, 1) += p.x * p.y;
-    leaf.icov_(0, 2) += p.x * p.z;
-    leaf.icov_(1, 1) += p.y * p.y;
-    leaf.icov_(1, 2) += p.y * p.z;
-    leaf.icov_(2, 2) += p.z * p.z;
-    leaf.centroid_[0] += p.x;
-    leaf.centroid_[1] += p.y;
-    leaf.centroid_[2] += p.z;
+    if (leaf.nr_points_ == 0) {
+        leaf.first_(0) = p.x;
+        leaf.first_(1) = p.y;
+        leaf.first_(2) = p.z;
+    }
+
+    float dx = p.x - leaf.first_(0);
+    float dy = p.y - leaf.first_(1);
+    float dz = p.z - leaf.first_(2);
+
+    leaf.icov_(0, 0) += dx * dx;
+    leaf.icov_(0, 1) += dx * dy;
+    leaf.icov_(0, 2) += dx * dz;
+    leaf.icov_(1, 1) += dy * dy;
+    leaf.icov_(1, 2) += dy * dz;
+    leaf.icov_(2, 2) += dz * dz;
+
+    leaf.centroid_[0] += dx;
+    leaf.centroid_[1] += dy;
+    leaf.centroid_[2] += dz;
     ++leaf.nr_points_;
 }
 
 template <typename PointT>
-bool VoxelGridBuilder<PointT>::
-computeLeafParams(Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> &eigensolver, Leaf &leaf)
+void VoxelGridBuilder<PointT>::
+computeLeafParams(Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> &eigensolver, Leaf &leaf)
 {
     // Get sum of points
     double sx = leaf.centroid_[0], sy = leaf.centroid_[1], sz = leaf.centroid_[2];
@@ -194,14 +218,14 @@ computeLeafParams(Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> &eigensolver, L
     double mx = sx / n, my = sy / n, mz = sz / n;
 
     // Compute the mean of points
-    leaf.centroid_[0] = mx;
-    leaf.centroid_[1] = my;
-    leaf.centroid_[2] = mz;
+    leaf.centroid_[0] = mx + leaf.first_(0);
+    leaf.centroid_[1] = my + leaf.first_(1);
+    leaf.centroid_[2] = mz + leaf.first_(2);
 
     // Compute the covariance matrix
     leaf.icov_(0, 0) = (leaf.icov_(0, 0) - sx * mx) / n_minus_one;
     leaf.icov_(1, 0) = leaf.icov_(0, 1) = (leaf.icov_(0, 1) - sx * my) / n_minus_one;
-    leaf.icov_(2, 0) = leaf.icov_(0, 2) = (leaf.icov_(0, 2) - sy * mz) / n_minus_one;
+    leaf.icov_(2, 0) = leaf.icov_(0, 2) = (leaf.icov_(0, 2) - sx * mz) / n_minus_one;
     leaf.icov_(1, 1) = (leaf.icov_(1, 1) - sy * my) / n_minus_one;
     leaf.icov_(2, 1) = leaf.icov_(1, 2) = (leaf.icov_(1, 2) - sy * mz) / n_minus_one;
     leaf.icov_(2, 2) = (leaf.icov_(2, 2) - sz * mz) / n_minus_one;
@@ -209,13 +233,14 @@ computeLeafParams(Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> &eigensolver, L
     // Compute the inverse covariance matrix
     eigensolver.compute(leaf.icov_);
     
-    Eigen::Matrix3d evals = eigensolver.eigenvalues().asDiagonal();
-    Eigen::Matrix3d evecs = eigensolver.eigenvectors();
+    Eigen::Matrix3f evals = eigensolver.eigenvalues().asDiagonal();
+    Eigen::Matrix3f evecs = eigensolver.eigenvectors();
 
     // This ensures all eigen values are non-negative and the greatest one is positive
     if (evals(0, 0) < 0 || evals(1, 1) < 0 || evals(2, 2) <= 0) {
-        // leaf.nr_points_ = -1;
-        return false;
+        leaf.centroid_[0] = std::numeric_limits<typename std::remove_reference<decltype(leaf.centroid_(0))>::type>::infinity();
+
+        return;
     }
 
     // This ensures all eigen values are positive
@@ -235,17 +260,18 @@ computeLeafParams(Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> &eigensolver, L
     evals(1, 1) = 1.0 / evals(1, 1);
     evals(2, 2) = 1.0 / evals(2, 2);
 
-    // Because the Eigen matrix are orthogonal, the inverse covariance matrix is V * D^-1 * V^T
+    // Because the Eigen matrix are orthogonal, the its inverse can easily computed by transpose matrix
+    // The inverse matrix of cov is V * D * V^T
     leaf.icov_ = evecs * evals * evecs.transpose();
 
     if (leaf.icov_.maxCoeff() == std::numeric_limits<float>::infinity() ||
         leaf.icov_.minCoeff() == -std::numeric_limits<float>::infinity()) {
-        // leaf.nr_points_ = -1;
+        leaf.centroid_[0] = std::numeric_limits<typename std::remove_reference<decltype(leaf.centroid_(0))>::type>::infinity();
 
-        return false;
+        return;
     }
 
-    return true;
+    return;
 }
 
 template <typename PointT>
@@ -289,5 +315,7 @@ void VoxelGridBuilder<PointT>::build(const std::string & pcd_path, const std::st
     }
 }
 
+template class VoxelGridBuilder<pcl::PointXYZ>;
+template class VoxelGridBuilder<pcl::PointXYZI>;
 
 }

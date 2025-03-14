@@ -35,9 +35,12 @@ public:
         void from_binary(std::istream & is);
 
         int nr_points_;
-        Eigen::VectorXf centroid_;
-        Eigen::Matrix3d icov_;
+        Eigen::Vector3f centroid_;
+        Eigen::Matrix3f icov_;
+        Eigen::Vector3f first_;
     };
+
+    VoxelGridBuilder();
 
     // Read the input PCDs, build the NDT structures, and save to files in the output directory
     void build(const std::string & pcd_path, const std::string & ndt_path);
@@ -54,7 +57,7 @@ private:
     void applyFilter(const PclCloudConstPtr & input, std::ofstream & output_path);
     void updateLeaf(Leaf& leaf, const PointT & p);
     // Compute the mean and inverse covariance of 
-    bool computeLeafParams(Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> &eigensolver, Leaf &leaf);
+    void computeLeafParams(Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> &eigensolver, Leaf &leaf);
 
     std::vector<std::string> discoverPCDs(const std::string & pcd_dir_or_file);
 

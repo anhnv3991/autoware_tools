@@ -1,0 +1,14 @@
+<launch>
+  <!-- <arg name="config_file_path" default="$(find-pkg-share autoware_voxel_grid_builder)/config/pointcloud_divider.param.yaml" description="Path to the configuration YAML file"/> -->
+  <arg name="input_pcd_or_dir" default="" description="The path to the folder containing the segmented PCDs" />
+  <arg name="output_dir" default="" description="The path to the folder containing the voxel grid files" />
+  <arg name="point_type" default="point_xyz" description="The type of points in the PCD files" />
+
+  <group>
+    <node pkg="autoware_voxel_grid_builder" exec="autoware_voxel_grid_builder_node" name="voxel_grid_builder" output="screen">
+      <param name="input_pcd_or_dir" value="$(var input_pcd_or_dir)" />
+      <param name="output_dir" value="$(var output_dir)" />
+      <param name="point_type" value="$(var point_type)" />
+    </node>
+  </group>
+</launch>
