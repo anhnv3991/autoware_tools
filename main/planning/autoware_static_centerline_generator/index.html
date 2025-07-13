@@ -1904,6 +1904,8 @@
         
           
         
+          
+        
       
       
         <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
@@ -2090,12 +2092,60 @@
         
         
         <div class="md-nav__link md-nav__link--index ">
-          <a href="../../map/autoware_tp_manager/">Autoware tp manager</a>
+          <a href="../../map/autoware_pointcloud_projection_converter/">Autoware pointcloud projection converter</a>
           
         </div>
       
       <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_9_4_label" aria-expanded="false">
         <label class="md-nav__title" for="__nav_9_4">
+          <span class="md-nav__icon md-icon"></span>
+          Autoware pointcloud projection converter
+        </label>
+        <ul class="md-nav__list" data-md-scrollfix>
+          
+            
+          
+        </ul>
+      </nav>
+    </li>
+  
+
+            
+          
+            
+              
+  
+  
+  
+    
+      
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+      
+      
+      
+        
+      
+      <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9_5" >
+      
+      
+        
+          
+            
+          
+        
+      
+      
+        
+        
+        <div class="md-nav__link md-nav__link--index ">
+          <a href="../../map/autoware_tp_manager/">Autoware tp manager</a>
+          
+        </div>
+      
+      <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_9_5_label" aria-expanded="false">
+        <label class="md-nav__title" for="__nav_9_5">
           <span class="md-nav__icon md-icon"></span>
           Autoware tp manager
         </label>
@@ -3077,7 +3127,7 @@ Currently there is no documentation about Vector Map Builder's operation for thi
 <li><code>&lt;vehicle-model&gt;</code></li>
 <li><code>&lt;goal-method&gt;</code> (not mandatory, <code>path_generator</code> or <code>behavior_path_planner</code> only)</li>
 </ul>
-<div class="highlight"><pre><span></span><code>ros2<span class="w"> </span>launch<span class="w"> </span>autoware_static_centerline_generator<span class="w"> </span>static_centerline_generator.launch.xml<span class="w"> </span>run_backgrond:<span class="o">=</span><span class="nb">false</span><span class="w"> </span>lanelet2_input_file_path:<span class="o">=</span>&lt;input-osm-path&gt;<span class="w"> </span>lanelet2_output_file_path:<span class="o">=</span>&lt;output-osm-path&gt;<span class="w"> </span>start_lanelet_id:<span class="o">=</span>&lt;start-lane-id&gt;<span class="w"> </span>start_pose:<span class="o">=</span>&lt;start-pose&gt;<span class="w"> </span>end_lanelet_id:<span class="o">=</span>&lt;end-lane-id&gt;<span class="w"> </span>goal_pose:<span class="o">=</span>&lt;goal-pose&gt;<span class="w"> </span>vehicle_model:<span class="o">=</span>&lt;vehicle-model&gt;<span class="w"> </span>goal_method:<span class="o">=</span>&lt;goal-method&gt;
+<div class="highlight"><pre><span></span><code>ros2<span class="w"> </span>launch<span class="w"> </span>autoware_static_centerline_generator<span class="w"> </span>static_centerline_generator.launch.xml<span class="w"> </span>run_backgrond:<span class="o">=</span><span class="nb">false</span><span class="w"> </span>lanelet2_input_file_path:<span class="o">=</span>&lt;input-osm-path&gt;<span class="w"> </span>lanelet2_output_file_path:<span class="o">=</span>&lt;output-osm-path&gt;<span class="w"> </span>start_lanelet_id:<span class="o">=</span>&lt;start-lane-id&gt;<span class="w"> </span>start_pose:<span class="o">=</span>&lt;start-pose&gt;<span class="w"> </span>end_lanelet_id:<span class="o">=</span>&lt;end-lane-id&gt;<span class="w"> </span>end_pose:<span class="o">=</span>&lt;end-pose&gt;<span class="w"> </span>vehicle_model:<span class="o">=</span>&lt;vehicle-model&gt;<span class="w"> </span>goal_method:<span class="o">=</span>&lt;goal-method&gt;
 </code></pre></div>
 <p><strong>Note that <code>&lt;goal-method&gt;:=behavior_path_planner</code> is not currently supported.</strong></p>
 <p>The default output map path containing the optimized centerline locates <code>/tmp/autoware_static_centerline_generator/lanelet2_map.osm</code>.
