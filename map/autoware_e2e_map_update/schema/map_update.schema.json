@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Parameters for autoware e2e map update node",
+  "type": "object",
+  "definitions": {
+    "tp_collector": {
+      "type": "object",
+      "properties": {
+        "path_to_bag_dir": {
+          "type": "string",
+          "description": "The path to the directory containing the input rosbag files",
+          "default": ""
+        },
+        "path_to_old_map": {
+          "type": "string",
+          "description": "The path to the directory containing the old PCD map files",
+          "default": ""
+        },
+        "path_to_config": {
+          "type": "string",
+          "description": "The path to the map4_engine.yaml file",
+          "default": ""
+        },
+        "cred_file": {
+          "type": "string",
+          "description": "The path to the credential file which contains the username and the password for map4_engine and mapfourmer",
+          "default": ""
+        }
+      },
+      "required": ["path_to_bag_dir", "path_to_old_map", "path_to_config", "cred_file"],
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "/**": {
+      "type": "object",
+      "properties": {
+        "ros__parameters": {
+          "$ref": "#/definitions/autoware_e2e_map_update"
+        }
+      },
+      "required": ["ros__parameters"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["/**"],
+  "additionalProperties": false
+}

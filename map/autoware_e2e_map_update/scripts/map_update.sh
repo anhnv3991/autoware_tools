@@ -3,7 +3,7 @@
 set -euo pipefail
 
 if [ "$#" -ne 4 ]; then
-    echo "Usage: $0 <path_to_the_ROS2_rosbag_folder> <path_to_the_old_map_folder> <path_to_the_new_map_folder> <credential_file>" 
+    echo "Usage: $0 <path_to_the_ROS2_rosbag_folder> <path_to_the_old_map_folder> <path_to_the_new_map_folder> <config>" 
     exit 1
 fi
 
@@ -85,26 +85,24 @@ mapfourmer_run() {
       -v "${input}":/mapfourmer/input/:rw \
       -v "${output}":/mapfourmer/output/:rw \
       mapfourmer:latest \
-      bash host_scripts/mapformer.sh "/mapfourmer/input" "/mapfourmer/output"
+      bash host_scripts/mapfourmer.sh "/mapfourmer/input" "/mapfourmer/output"
 }
 
 BAG_DIR_PATH=$1
 OLD_MAP_PATH=$2
 NEW_MAP_PATH=$3
-CRED_FILE=$4
-TMP_DIR="/media/anh/AnhNguyen/tmp_dir/"
+MAP4_CONFIG=$4
+TMP_DIR="${NEW_MAP_PATH}/tmp_dir/"
 TMP_BAG_DIR="${TMP_DIR}/rosbag/"
 TMP_MAP_DIR="${TMP_DIR}/map/"
 ROS2_MERGED_BAG_PATH="${TMP_BAG_DIR}/merged.db3"
-# ROS2_FINAL_BAG_PATH="${TMP_DIR}/final.db3"
-ROS2_FINAL_BAG_PATH="${TMP_DIR}/merged.db3"
-SENSOR_TOPIC="/sensing/lidar/right_upper/pandar_packets"
-VENV_PATH="/home/anh/Work/rosbags/venv/"
-MAP4_DATA="/media/anh/AnhNguyen/map4_engine_output/data/"
-MAP4_INPUT_BAG="${MAP4_DATA}/input.bag"
-MAP4_INPUT_MAP="${MAP4_DATA}/map/map.pcd"
-MAP4_OUTPUT_DIR="${MAP4_DATA}/output/"
-MAP4_CONFIG="${MAP4_DATA}/map4_engine.yaml"
+SENSOR_TOPIC="$(yq '.lidar[0].topic' ${MAP4_CONFIG})"
+IMU_TOPIC="$(yq '.imu[0].topic' ${MAP4_CONFIG})"
+GNSS_TOPIC="$(yq '.gnss[0].topic' ${MAP4_CONFIG})"
+MAP4_INPUT_DIR="${M4E_OUT_MOUNT}/input/"
+MAP4_INPUT_BAG="${MAP4_INPUT_DIR}/input.bag"
+MAP4_INPUT_MAP="${MAP4_INPUT_DIR}/map.pcd"
+MAP4_OUTPUT_DIR="${M4E_OUT_MOUNT}/output/"
 
 ################ STEP 1: Rosbag pre-processing  ############
 # Check if the input folders exist
@@ -128,32 +126,22 @@ mkdir -p "${TMP_DIR}"
 mkdir -p "${TMP_BAG_DIR}"
 mkdir -p "${TMP_MAP_DIR}"
 
-# Clear the tmp directory, just in case the directory is created already
-if [ -z "$(find ${TMP_DIR} -mindepth 1 -print -quit)" ]; then
-    echo "The folder ${TMP_DIR} is not empty. Do you want to delete all of its content? (y/n):"
-    read -n 1 choice
-    echo
-    if [ "y" == "${choice}" ]; then
-        find "${TMP_DIR}" -mindepth 1 -delete
-    fi
-fi
-
-# Ask if users want to delete filtered rosbag files, too
+# Ask if users want to delete filtered rosbag files
 if [ -z "$(find ${TMP_BAG_DIR} -mindepth 1 -print -quit)" ]; then
     echo "The folder ${TMP_BAG_DIR} is not empty. Do you want to delete all of its content? (y/n):"
     read -n 1 choice
+    echo ""
+
     if [ "y" == "${choice}" ]; then
         find "${TMP_BAG_DIR}" -mindepth 1 -delete
     fi
 fi
 
-find "${TMP_DIR}" -mindepth 1 -delete
-
 # Create the output directory 
-if [ ! -d "${MAP4_DATA}/output" ]; then
-    rm -fr "${MAP4_DATA}/output"
+if [ ! -d "${MAP4_OUTPUT_DIR}" ]; then
+    rm -fr "${MAP4_OUTPUT_DIR}"
 fi
-mkdir -p "${MAP4_DATA}/output"
+mkdir -p "${MAP4_OUTPUT_DIR}"
 
 # Find all .db3 files in the bag folder
 echo "####################################################"
@@ -164,8 +152,9 @@ echo "####################################################"
 # Ask if users want to delete old rosbag files
 # If no, then this step is skipped
 if [ -f "${MAP4_INPUT_BAG}" ]; then
-    echo "The input rosbag already exists at ${MAP4_INPUT_BAG}. Do you want to re-create? (y/n):"
+    echo "A rosbag already exists at ${MAP4_INPUT_BAG}. Do you want to re-create it? (y/n):"
     read -n1 choice
+    echo ""
 else 
     choice="y"
 fi
@@ -176,6 +165,7 @@ if [ "y" == "${choice}" ]; then
     if [ -z "$(find ${TMP_BAG_DIR} -mindepth 1 -print -quit)" ]; then
         echo "The folder ${TMP_BAG_DIR} is not empty. Do you want to delete all of its content? (y/n):"
         read -n 1 choice
+        echo ""
     else
         choice="y"
     fi
@@ -192,7 +182,7 @@ if [ "y" == "${choice}" ]; then
             ROS2_BAG_LIST+=("${BAG_FILE}")
         done
 
-        echo -e "\n####### Found ${#ROS2_BAG_LIST[@]} rosbags. Filtering...\n"
+        echo -e "\nFound ${#ROS2_BAG_LIST[@]} rosbags. Filtering...\n"
 
         # Filter all input .db3 files
         # The filtered files are saved in the TMP directory
@@ -205,11 +195,7 @@ if [ "y" == "${choice}" ]; then
             echo "Filtering ${filename}"
 
             ros2 bag filter -o "${filtered_name}" "${BAG_FILE}" -i \
-                /sensing/imu/imu_data \
-                /sensing/gnss/septentrio/nav_sat_fix \
-                "${SENSOR_TOPIC}" \
-                /tf_static \
-                /vehicle/status/velocity_status > /dev/null 2>&1 # Hide the output
+                "${IMU_TOPIC}" "${GNSS_TOPIC}" "${SENSOR_TOPIC}" >/dev/null 2>&1 # Hide the output
 
             FILTERED_ROS2_BAG_LIST+=("${filtered_name}")
         done
@@ -225,11 +211,11 @@ if [ "y" == "${choice}" ]; then
 
     # Convert the ROS2 merged rosbag to ROS1 format
     # Activate venv 
-    source "${VENV_PATH}/bin/activate"
+    source "${ROSBAGS_VENV}/bin/activate"
 
-    rosbags-convert-2to1 "${ROS2_FINAL_BAG_PATH}" > /dev/null 2>&1
+    rosbags-convert-2to1 "${ROS2_MERGED_BAG_PATH}" >/dev/null 2>&1
     # Move the converted ROS1 bag to the data directory
-    mv "${ROS2_FINAL_BAG_PATH}".bag "${MAP4_DATA}"/input.bag
+    mv "${ROS2_MERGED_BAG_PATH}".bag "${MAP4_INPUT_BAG}"
     # Deactivate venv
     deactivate
 
@@ -240,6 +226,7 @@ fi
 if [ -f "${MAP4_INPUT_MAP}" ]; then
     echo "An input PCD map for map4_engine already exists at ${MAP4_INPUT_MAP}. Do you want to re-create? (y/n):"
     read -n 1 choice
+    echo ""
 else
     choice="y"
 fi
@@ -247,7 +234,7 @@ fi
 if [ "y" == "${choice}" ]; then
     # Merge the PCD maps to a single file for faster processing
     echo "Combining PCD files"
-    mkdir -p "${MAP4_DATA}/map/"
+    mkdir -p "${MAP4_INPUT_DIR}/map/"
     ros2 launch autoware_pointcloud_merger pointcloud_merger.launch.xml \
         input_pcd_dir:="${OLD_MAP_PATH}" \
         output_pcd:="${MAP4_INPUT_MAP}" > /dev/null
@@ -257,7 +244,7 @@ if [ "y" == "${choice}" ]; then
 fi
 
 ################ STEP 2: Map Update  ############
-# Clean the tmp output directory at MAP4_DATA/output
+# Clean the tmp output directory at MAP4_INPUT_DIR/output
 mkdir -p "${MAP4_OUTPUT_DIR}"
 find "${MAP4_OUTPUT_DIR}" -mindepth 1 -delete
 
@@ -268,16 +255,17 @@ yq e '.pcd2x.file_format = 1' -i "${MAP4_CONFIG}"
 
 # Update the old map
 echo "Updating PCD map..."
-docker compose -f "${HOME}/.local/lib/python3.10/site-packages/map4_cli/data/docker-compose.cli.nvidia.yaml" run -it --rm -v "${MAP4_DATA}"/:/data/   \
+docker compose -f "${HOME}/.local/lib/python3.10/site-packages/map4_cli/data/docker-compose.cli.nvidia.yaml" run \
+    -it --rm -v "${MAP4_INPUT_DIR}"/:/data/   \
     map4_engine \
     scripts/pointcloud_update/scan2map.sh \
     -o /data/output/ \
-    /data/map/ \
+    /data/ \
     /data/ \
     /data/map4_engine.yaml \
     /home/guest/map4_engine/lidar_calib
 
-# Now the new map is stored in the folder ${MAP4_DATA}/output/update_map/
+# Now the new map is stored in the folder ${MAP4_OUTPUT_DIR}/update_map/
 # Run mapfourmer to clean the map from dynamic points
 echo -e "\nDone. Removing dynamic points..."
 
@@ -286,34 +274,59 @@ mkdir -p "${MAP4_OUTPUT_DIR}/clean/"
 # Make sure it is empty
 find "${MAP4_OUTPUT_DIR}/clean/" -mindepth 1 -delete
 
-read -r username < "${CRED_FILE}"
-read -r password < <(tail -n +2 "${CRED_FILE}")
+read username password <<< $(map4-cli show | jq -r '[.username, .password] | @tsv')
+
 mapfourmer_run "${MAP4_OUTPUT_DIR}/update_map/" "${MAP4_OUTPUT_DIR}/clean/" "${username}" "${password}"
 
 # Convert the LAS files to PCD format
 yq e '.pcd2x.file_format = 0' -i "${MAP4_CONFIG}"
 
-docker compose -f "${HOME}/.local/lib/python3.10/site-packages/map4_cli/data/docker-compose.cli.nvidia.yaml" run -it --rm -v "${MAP4_DATA}"/:/data/   \
+docker compose -f "${HOME}/.local/lib/python3.10/site-packages/map4_cli/data/docker-compose.cli.nvidia.yaml" run -it --rm -v "${MAP4_INPUT_DIR}"/:/data/   \
     map4_engine \
     scripts/pcd/x2x.sh \
     /data/output/clean/non-noise/input/ \
     /data/map4_engine.yaml 
 
-# Here we have to enter the input/output directories, select model, and the quality of the processing manually
-# After finished, run the pointcloud divider on the clean files
-ros2 launch autoware_pointcloud_divider pointcloud_divider.launch.xml \
-    input_pcd_or_dir:="${MAP4_OUTPUT_DIR}/clean/non-noise/input/" \
-    output_pcd_dir:="${NEW_MAP_PATH}" \
-    leaf_size:=0.2  \
-    prefix:=new
-
-echo "Done!"
 ################ STEP 3: Post Validation  ############
 # Use CloudCompare, please!
 # Visualizing thousands small PCD files is quite troublesome
 # This command merges all small PCD files to a single big one, 
 # which is easier to visualize by CloudCompare
 ros2 launch autoware_pointcloud_merger pointcloud_merger.launch.xml \
-    input_pcd_dir:="${MAP4_DATA}/output/clean/non-noise/input/" \
-    output_pcd:="${MAP4_DATA}/map/merged.pcd" > /dev/null
+    input_pcd_dir:="${MAP4_OUTPUT_DIR}/clean/non-noise/input/" \
+    output_pcd:="${MAP4_OUTPUT_DIR}/merged.pcd" > /dev/null
 
+echo "The update is finished. Please check the updated map at ${MAP4_OUTPUT_DIR}/merged.pcd"
+
+echo -e "Do you feel satisfied with the updated map. \
+        If you do, all of the tmp files would be deleted, and the updated PCD map \
+        will be segmented by autoware point cloud divider and put at \n \
+        ${NEW_MAP_PATH}. \n \
+        If you do not, the tmp files would still remain, and you can adjust parameters \
+        in the config file at \n \
+        ${MAP4_CONFIG} \n
+        to achieve better update quality. \
+        Enter your choice (y/n):"
+
+read -n 1 choice
+echo ""
+
+if [ "y" == "${choice}" ]; then
+    # After finished, run the pointcloud divider on the clean files
+    ros2 launch autoware_pointcloud_divider pointcloud_divider.launch.xml \
+        input_pcd_or_dir:="${MAP4_OUTPUT_DIR}/clean/non-noise/input/" \
+        output_pcd_dir:="${NEW_MAP_PATH}" \
+        leaf_size:=0.2  \
+        prefix:=new
+
+    # Remove the tmp directory
+    rm -fr "${TMP_DIR}"
+
+    # Remove all intermediate files
+    rm -fr "${MAP4_INPUT_DIR}"
+    rm -fr "${MAP4_OUTPUT_DIR}"
+
+    echo -e "The PCD map update is now completed. Please get the updated files at \n ${NEW_MAP_PATH}"
+else
+    echo "Since the updated quality is not good, please check your data and adjust parameters at \n ${MAP4_CONFIG}"
+fi
