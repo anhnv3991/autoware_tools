@@ -8,6 +8,7 @@ install(PROGRAMS
   scripts/mapfourmer.sh
   scripts/map_update.sh
   scripts/install.sh
+  scripts/uninstall.sh
   DESTINATION lib/${PROJECT_NAME}
 )
 

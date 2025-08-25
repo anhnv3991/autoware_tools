@@ -2,8 +2,8 @@
 
 set -euo pipefail
 
-if [ "$#" -ne 4 ]; then
-    echo "Usage: $0 <path_to_the_ROS2_rosbag_folder> <path_to_the_old_map_folder> <path_to_the_new_map_folder> <config>" 
+if [ "$#" -ne 3 ]; then
+    echo "Usage: $0 <path_to_the_ROS2_rosbag_folder> <path_to_the_old_map_folder> <path_to_the_new_map_folder>" 
     exit 1
 fi
 
@@ -25,29 +25,18 @@ mapfourmer_run() {
 
   case "$status_code" in
   200)
-    echo -en "\033[1F\033[K"
-    echo -e "         \033[32m✔ ユーザー名:\033[0m $username"
-    echo -en "\033[K"
-    echo -e "         \033[32m✔ パスワード:\033[0m ${password//?/*}"
+    echo "Authorization succeeded!"
     ;;
   404)
-    echo -en "\033[1F\033[K"
-    echo -e "         \033[31m✘ ユーザー名:\033[0m $username"
-    echo -e "$error ユーザー名が見つかりませんでした。"
+    echo "Could not found the username ${username}"
     exit 1
     ;;
   401)
-    echo -en "\033[1F\033[K"
-    echo -e "         \033[31m✘ ユーザー名:\033[0m $username"
-    echo -en "\033[K"
-    echo -e "         \033[31m✘ パスワード:\033[0m ${password//?/*}"
-    echo -e "$error ユーザー名またはパスワードが異なります。"
+    echo "Invalid username or password"
     exit 1
     ;;
   *)
-    echo
-    echo -e "$error 予期せぬエラーが発生しました。インターネット接続を確認してください。"
-    echo -e "$error 問題が解決されない場合はsupport@map4.jpまでご連絡ください。"
+    echo "An unexpected error has occurred. Please check your internet connection!"
     exit 1
     ;;
   esac
@@ -60,7 +49,16 @@ mapfourmer_run() {
 
   echo "docker_volume = ${docker_volume}"
 
-  SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  # We may run into symbolic link, which cannot be read from docker images
+  # Hence, we need the actual path to the script
+  SCRIPT_DIR="$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+
+  echo "Script dir = ${SCRIPT_DIR}"
+  echo "input = ${input}"
+  echo "output = ${output}"
+  echo "${DISPLAY}"
+
+  # Run mapfourmer docker 
 
   # Run mapfourmer docker 
   docker run \
@@ -91,21 +89,19 @@ mapfourmer_run() {
 BAG_DIR_PATH=$1
 OLD_MAP_PATH=$2
 NEW_MAP_PATH=$3
-MAP4_CONFIG=$4
 TMP_DIR="${NEW_MAP_PATH}/tmp_dir/"
 TMP_BAG_DIR="${TMP_DIR}/rosbag/"
 TMP_MAP_DIR="${TMP_DIR}/map/"
 ROS2_MERGED_BAG_PATH="${TMP_BAG_DIR}/merged.db3"
-SENSOR_TOPIC="$(yq '.lidar[0].topic' ${MAP4_CONFIG})"
-IMU_TOPIC="$(yq '.imu[0].topic' ${MAP4_CONFIG})"
-GNSS_TOPIC="$(yq '.gnss[0].topic' ${MAP4_CONFIG})"
 MAP4_INPUT_DIR="${M4E_OUT_MOUNT}/input/"
 MAP4_INPUT_BAG="${MAP4_INPUT_DIR}/input.bag"
 MAP4_INPUT_MAP="${MAP4_INPUT_DIR}/map.pcd"
 MAP4_OUTPUT_DIR="${M4E_OUT_MOUNT}/output/"
+INPUT_CONFIG="${M4E_OUT_MOUNT}/map4_engine.yaml"
+WORKING_DIR="$(basename "$(dirname "$(readlink -f "$0")")")"
 
 ################ STEP 1: Rosbag pre-processing  ############
-# Check if the input folders exist
+# Check if the input folders and files exist
 if [ ! -d "${BAG_DIR_PATH}" ]; then
     echo "Error: the rosbag folder ${BAG_DIR_PATH} does not exist."
     exit 2
@@ -116,8 +112,8 @@ if [ ! -d "${OLD_MAP_PATH}" ]; then
     exit 2
 fi
 
-if [ ! -f "${CRED_FILE}" ]; then
-    echo "Error: the credential file ${CRED_FILE} does not exist."
+if [ ! -f "${INPUT_CONFIG}" ]; then
+    echo "Error: the config file at ${INPUT_CONFIG} does not exist."
     exit 2
 fi
 
@@ -125,35 +121,33 @@ fi
 mkdir -p "${TMP_DIR}"
 mkdir -p "${TMP_BAG_DIR}"
 mkdir -p "${TMP_MAP_DIR}"
-
-# Ask if users want to delete filtered rosbag files
-if [ -z "$(find ${TMP_BAG_DIR} -mindepth 1 -print -quit)" ]; then
-    echo "The folder ${TMP_BAG_DIR} is not empty. Do you want to delete all of its content? (y/n):"
-    read -n 1 choice
-    echo ""
-
-    if [ "y" == "${choice}" ]; then
-        find "${TMP_BAG_DIR}" -mindepth 1 -delete
-    fi
-fi
+mkdir -p "${MAP4_INPUT_DIR}"
+mkdir -p "${MAP4_OUTPUT_DIR}"
 
 # Create the output directory 
-if [ ! -d "${MAP4_OUTPUT_DIR}" ]; then
+if [ -d "${MAP4_OUTPUT_DIR}" ]; then
     rm -fr "${MAP4_OUTPUT_DIR}"
 fi
 mkdir -p "${MAP4_OUTPUT_DIR}"
 
+# Copy the config YAML file to map4 input directory
+MAP4_CONFIG="${MAP4_INPUT_DIR}/map4_engine.yaml"
+cp "${INPUT_CONFIG}" "${MAP4_CONFIG}"
+
+SENSOR_TOPIC="$(yq '.lidar[0].topic' ${MAP4_CONFIG})"
+IMU_TOPIC="$(yq '.imu[0].topic' ${MAP4_CONFIG})"
+GNSS_TOPIC="$(yq '.gnss[0].topic' ${MAP4_CONFIG})"
+
 # Find all .db3 files in the bag folder
-echo "####################################################"
-echo "#          Step 1: rosbag pre-processing           #"
-echo "####################################################"
+echo "# Step 1: Data pre-processing"
 
 # Step 1: rosbag pre-processing
 # Ask if users want to delete old rosbag files
 # If no, then this step is skipped
 if [ -f "${MAP4_INPUT_BAG}" ]; then
-    echo "A rosbag already exists at ${MAP4_INPUT_BAG}. Do you want to re-create it? (y/n):"
-    read -n1 choice
+    echo "A rosbag already exists at ${MAP4_INPUT_BAG}. Do you want to re-create it (y/n)?: "
+    read choice
+    choice="${choice:0:1}"
     echo ""
 else 
     choice="y"
@@ -163,14 +157,15 @@ if [ "y" == "${choice}" ]; then
     # Try to re-create the input ROS1 rosbag
     # Check if the tmp ROS2 rosbag already exist
     if [ -z "$(find ${TMP_BAG_DIR} -mindepth 1 -print -quit)" ]; then
-        echo "The folder ${TMP_BAG_DIR} is not empty. Do you want to delete all of its content? (y/n):"
-        read -n 1 choice
+        echo "The folder ${TMP_BAG_DIR} is not empty. Do you want to delete all of its content (y/n)?:"
+        read choice
+        choice="${choice:0:1}"
         echo ""
     else
         choice="y"
     fi
 
-    # If users want to delete all tmp rosbags or the tmp rosbags have not been created yet
+    # If users want to delete all tmp rosbags, or the tmp rosbags have not been created yet
     if [ "y" == "${choice}" ]; then
         # Delete all tmp ROS2 rosbags
         find "${TMP_BAG_DIR}" -mindepth 1 -delete
@@ -222,10 +217,12 @@ if [ "y" == "${choice}" ]; then
     echo -e "\nDone."
 fi
 
+echo "map4 input map = ${MAP4_INPUT_MAP}"
 
 if [ -f "${MAP4_INPUT_MAP}" ]; then
     echo "An input PCD map for map4_engine already exists at ${MAP4_INPUT_MAP}. Do you want to re-create? (y/n):"
-    read -n 1 choice
+    read choice
+    choice="${choice:0:1}"
     echo ""
 else
     choice="y"
@@ -234,7 +231,6 @@ fi
 if [ "y" == "${choice}" ]; then
     # Merge the PCD maps to a single file for faster processing
     echo "Combining PCD files"
-    mkdir -p "${MAP4_INPUT_DIR}/map/"
     ros2 launch autoware_pointcloud_merger pointcloud_merger.launch.xml \
         input_pcd_dir:="${OLD_MAP_PATH}" \
         output_pcd:="${MAP4_INPUT_MAP}" > /dev/null
@@ -244,6 +240,7 @@ if [ "y" == "${choice}" ]; then
 fi
 
 ################ STEP 2: Map Update  ############
+echo "# Step 2: Map Update"
 # Clean the tmp output directory at MAP4_INPUT_DIR/output
 mkdir -p "${MAP4_OUTPUT_DIR}"
 find "${MAP4_OUTPUT_DIR}" -mindepth 1 -delete
@@ -255,14 +252,28 @@ yq e '.pcd2x.file_format = 1' -i "${MAP4_CONFIG}"
 
 # Update the old map
 echo "Updating PCD map..."
-docker compose -f "${HOME}/.local/lib/python3.10/site-packages/map4_cli/data/docker-compose.cli.nvidia.yaml" run \
-    -it --rm -v "${MAP4_INPUT_DIR}"/:/data/   \
-    map4_engine \
+read username password user_id group_id tag <<< \
+    $(map4-cli show | sed -n '/^{/,/^}/p' | \
+    jq -r '[.username, .password, .user_id, .group_id, .tag] | @tsv')
+
+image="$(docker images --format '{{.Repository}}:{{.Tag}}' \
+        | grep "map4_engine_ui_nvidia" \
+        | sort -t: -k2 -V\
+        | tail -n1)"
+
+docker run -it --rm \
+    --env "AWS_USERNAME=${username}" \
+    --env "AWS_PASSWORD=${password}" \
+    --env "USER_ID=${user_id}" \
+    --env "GROUP_ID=${group_id}" \
+    --env "M4E_TAG=${tag}" \
+    --runtime=nvidia \
+    -v "${M4E_OUT_MOUNT}"/:/data/ ${image} \
     scripts/pointcloud_update/scan2map.sh \
     -o /data/output/ \
-    /data/ \
-    /data/ \
-    /data/map4_engine.yaml \
+    /data/input/ \
+    /data/input/ \
+    /data/input/map4_engine.yaml \
     /home/guest/map4_engine/lidar_calib
 
 # Now the new map is stored in the folder ${MAP4_OUTPUT_DIR}/update_map/
@@ -274,15 +285,18 @@ mkdir -p "${MAP4_OUTPUT_DIR}/clean/"
 # Make sure it is empty
 find "${MAP4_OUTPUT_DIR}/clean/" -mindepth 1 -delete
 
-read username password <<< $(map4-cli show | jq -r '[.username, .password] | @tsv')
-
 mapfourmer_run "${MAP4_OUTPUT_DIR}/update_map/" "${MAP4_OUTPUT_DIR}/clean/" "${username}" "${password}"
 
 # Convert the LAS files to PCD format
 yq e '.pcd2x.file_format = 0' -i "${MAP4_CONFIG}"
 
-docker compose -f "${HOME}/.local/lib/python3.10/site-packages/map4_cli/data/docker-compose.cli.nvidia.yaml" run -it --rm -v "${MAP4_INPUT_DIR}"/:/data/   \
-    map4_engine \
+docker run -it --rm \
+    --env "AWS_USERNAME=${username}" \
+    --env "AWS_PASSWORD=${password}" \
+    --env "USER_ID=${user_id}" \
+    --env "GROUP_ID=${group_id}" \
+    --env "M4E_TAG=${tag}" \
+    -v "${M4E_OUT_MOUNT}"/:/data/  "${image}" \
     scripts/pcd/x2x.sh \
     /data/output/clean/non-noise/input/ \
     /data/map4_engine.yaml 
@@ -308,7 +322,8 @@ echo -e "Do you feel satisfied with the updated map. \
         to achieve better update quality. \
         Enter your choice (y/n):"
 
-read -n 1 choice
+read choice
+choice="${choice:0:1}"
 echo ""
 
 if [ "y" == "${choice}" ]; then
@@ -330,3 +345,5 @@ if [ "y" == "${choice}" ]; then
 else
     echo "Since the updated quality is not good, please check your data and adjust parameters at \n ${MAP4_CONFIG}"
 fi
+
+cd "${WORKING_DIR}"
