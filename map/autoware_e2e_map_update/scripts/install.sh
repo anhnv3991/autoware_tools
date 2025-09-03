@@ -4,14 +4,14 @@ set -eo pipefail
 shopt -s nullglob
 
 # Install all necessary tools for PCD map update
-MAP4_PATH="$(dirname "$(readlink -f "$0")")"
+MAP4_PATH="$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 WORKING_DIR="$(dirname "${MAP4_PATH}")"
 
 # Install MapIV rosbags to convert ROS2 to ROS1
 if [ ! -d "${WORKING_DIR}/rosbags/" ]; then
     echo -e "\nInstalling MapIV rosbags..."
     repo_url="https://github.com/MapIV/rosbags.git"
-    git clone -b feature/ros2_to_ros1 --single-branch "${repo_url}"
+    git clone -b feature/ros2_to_ros1 --single-branch "${repo_url}" "${WORKING_DIR}/rosbags/"
     cd "${WORKING_DIR}/rosbags/"
     python3 -m venv venv
     . venv/bin/activate

@@ -1,6 +1,7 @@
 #!/bin/bash
 
-WORKING_DIR="$(basename "$(pwd)")"
+SCRIPT_DIR="$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+WORKING_DIR="$(dirname "${SCRIPT_DIR}")"
 
 # Remove MapIV rosbags
 if [ -d "${WORKING_DIR}/rosbags/" ]; then

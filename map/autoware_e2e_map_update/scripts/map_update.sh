@@ -53,13 +53,6 @@ mapfourmer_run() {
   # Hence, we need the actual path to the script
   SCRIPT_DIR="$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
-  echo "Script dir = ${SCRIPT_DIR}"
-  echo "input = ${input}"
-  echo "output = ${output}"
-  echo "${DISPLAY}"
-
-  # Run mapfourmer docker 
-
   # Run mapfourmer docker 
   docker run \
     --rm -it \
@@ -98,7 +91,8 @@ MAP4_INPUT_BAG="${MAP4_INPUT_DIR}/input.bag"
 MAP4_INPUT_MAP="${MAP4_INPUT_DIR}/map.pcd"
 MAP4_OUTPUT_DIR="${M4E_OUT_MOUNT}/output/"
 INPUT_CONFIG="${M4E_OUT_MOUNT}/map4_engine.yaml"
-WORKING_DIR="$(basename "$(dirname "$(readlink -f "$0")")")"
+SCRIPT_DIR="$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+WORKING_DIR="$(dirname "${SCRIPT_DIR}")"
 
 ################ STEP 1: Rosbag pre-processing  ############
 # Check if the input folders and files exist
@@ -195,10 +189,11 @@ if [ "y" == "${choice}" ]; then
             FILTERED_ROS2_BAG_LIST+=("${filtered_name}")
         done
 
-        echo -e "\nFiltered ${#FILTERED_ROS2_BAG_LIST[@]} rosbags. Merging all...\n"
+        echo -e "\nFiltered ${#FILTERED_ROS2_BAG_LIST[@]} rosbags. Merging the following bags\n"
+        echo "${FILTERED_ROS2_BAG_LIST[@]}"
 
         # Merge all rosbags to a single one
-        ros2 bag merge -o "${ROS2_MERGED_BAG_PATH}" "${FILTERED_ROS2_BAG_LIST}"
+        ros2 bag merge -o "${ROS2_MERGED_BAG_PATH}" "${FILTERED_ROS2_BAG_LIST[@]}"
 
         # Let's stop here to check
         echo -e "\nFinished merging.\n"
@@ -261,20 +256,44 @@ image="$(docker images --format '{{.Repository}}:{{.Tag}}' \
         | sort -t: -k2 -V\
         | tail -n1)"
 
+# map4_engine's lidar inertial odometry is unstable at the beginning of the bag
+# Hence, remove some initial messages of the input bag
+# docker run -it --rm \
+#     --env "AWS_USERNAME=${username}" \
+#     --env "AWS_PASSWORD=${password}" \
+#     --env "USER_ID=${user_id}" \
+#     --env "GROUP_ID=${group_id}" \
+#     --env "M4E_TAG=${tag}" \
+#     --env "DISPLAY=${DISPLAY}" \
+#     --runtime=nvidia \
+#     -v "${M4E_OUT_MOUNT}"/:/data/ ${image} \
+#     bash -c 'rosbag filter /data/input/input.bag /data/input/tmp_input.bag \
+#       "t.to_sec() >= $(rosbag info -y -k start /data/input/input.bag) + 20.0" && \
+#       mv /data/input/tmp_input.bag /data/input/input.bag'
+
+# Map Update
+# Use the legacy lidar odometry
 docker run -it --rm \
     --env "AWS_USERNAME=${username}" \
     --env "AWS_PASSWORD=${password}" \
     --env "USER_ID=${user_id}" \
     --env "GROUP_ID=${group_id}" \
     --env "M4E_TAG=${tag}" \
+    --env "DISPLAY=${DISPLAY}" \
     --runtime=nvidia \
     -v "${M4E_OUT_MOUNT}"/:/data/ ${image} \
-    scripts/pointcloud_update/scan2map.sh \
-    -o /data/output/ \
-    /data/input/ \
-    /data/input/ \
-    /data/input/map4_engine.yaml \
-    /home/guest/map4_engine/lidar_calib
+    bash -c "grep -qF '\$SLAM -o \$FILE_PATH \$BAG_PATH \$CONFIG \$LIDAR_CALIB' \
+                /home/guest/map4_engine/scripts/pointcloud_update/scan2map.sh && \
+                sed -i 's|\$SLAM -o \$FILE_PATH \$BAG_PATH \$CONFIG \$LIDAR_CALIB|\$SLAM -o \$FILE_PATH -l \$BAG_PATH \$CONFIG \$LIDAR_CALIB|g' \
+                /home/guest/map4_engine/scripts/pointcloud_update/scan2map.sh &&\
+                scripts/pointcloud_update/scan2map.sh \
+                -o /data/output/ \
+                /data/input/ \
+                /data/input/ \
+                /data/input/map4_engine.yaml \
+                /home/guest/map4_engine/lidar_calib"
+
+
 
 # Now the new map is stored in the folder ${MAP4_OUTPUT_DIR}/update_map/
 # Run mapfourmer to clean the map from dynamic points
@@ -312,15 +331,7 @@ ros2 launch autoware_pointcloud_merger pointcloud_merger.launch.xml \
 
 echo "The update is finished. Please check the updated map at ${MAP4_OUTPUT_DIR}/merged.pcd"
 
-echo -e "Do you feel satisfied with the updated map. \
-        If you do, all of the tmp files would be deleted, and the updated PCD map \
-        will be segmented by autoware point cloud divider and put at \n \
-        ${NEW_MAP_PATH}. \n \
-        If you do not, the tmp files would still remain, and you can adjust parameters \
-        in the config file at \n \
-        ${MAP4_CONFIG} \n
-        to achieve better update quality. \
-        Enter your choice (y/n):"
+echo -e "Do you feel satisfied with the updated map. If you do, all of the tmp files would be deleted, and the updated PCD map will be segmented by autoware point cloud divider and put at \n${NEW_MAP_PATH}. \nIf you do not, the tmp files would still remain, and you can adjust parameters in the config file at \n${MAP4_CONFIG} \nto achieve better update quality. Enter your choice (y/n):"
 
 read choice
 choice="${choice:0:1}"
@@ -343,7 +354,5 @@ if [ "y" == "${choice}" ]; then
 
     echo -e "The PCD map update is now completed. Please get the updated files at \n ${NEW_MAP_PATH}"
 else
-    echo "Since the updated quality is not good, please check your data and adjust parameters at \n ${MAP4_CONFIG}"
+    echo -e "Since the updated quality is not good, please check your data and adjust parameters at \n ${MAP4_CONFIG}"
 fi
-
-cd "${WORKING_DIR}"
