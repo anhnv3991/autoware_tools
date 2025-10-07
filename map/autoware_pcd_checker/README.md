@@ -20,14 +20,13 @@ colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release --catkin-skip-building-test
 
   | Name       | Description                                 |
   | ---------- | ------------------------------------------- |
-  | INPUT_DIR  | Directory that contains all input PCD files |
-  | OUTPUT_PCD | Name of the output PCD file                 |
+  | MAP_PATH   | The directory that contains the map files   |
 
-`INPUT_DIR` and `OUTPUT_PCD` should be specified as **absolute paths**.
+`MAP_PATH` should be specified as **absolute paths**.
 
 ## Parameter
 
-{{ json_to_markdown("map/autoware_pointcloud_merger/schema/pointcloud_merger.schema.json") }}
+{{ json_to_markdown("map/autoware_pcd_checker/schema/pcd_checker.schema.json") }}
 
 ## LICENSE
 
