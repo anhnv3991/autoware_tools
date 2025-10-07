@@ -1,4 +1,4 @@
-# autoware_pointcloud_merger
+# autoware_pcd_checker
 
 This is a tool for checking a PCD map fulfills the PCD Map creation requirement:
 
